@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AYP Tech - Voice Interaction Portal</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <script type="module" crossorigin src="./assets/index-B-ber7RZ.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-4LGyvxXs.css">
+  <style>
+    /* Hide metrics tabs, debug panels, tech stack information */
+    [data-slot="panel-metrics"],
+    button[aria-label*="Metrics"],
+    button[aria-label*="metrics"],
+    button[title*="Metrics"],
+    div[class*="metrics"],
+    div[data-slot*="metrics"],
+    button:has(svg.lucide-activity) {
+      display: none !important;
+    }
+  </style>
+  <script>
+    // Runtime cleaner that sanitizes any dynamic mentions of Gemini or tech stack
+    const sanitizeDOM = () => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeValue && /gemini|pipecat|daily/i.test(node.nodeValue)) {
+          node.nodeValue = node.nodeValue
+            .replace(/GeminiLiveLLMService/gi, "AYP Voice Engine")
+            .replace(/Gemini/gi, "AYP Intelligence")
+            .replace(/Pipecat/gi, "AYP Tech")
+            .replace(/Daily/gi, "AYP Network");
+        }
+      }
+    };
+    const observer = new MutationObserver(sanitizeDOM);
+    window.addEventListener("DOMContentLoaded", () => {
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+  </script>
+</head>
+
+<body>
+  <div id="root"></div>
+</body>
+
+</html>

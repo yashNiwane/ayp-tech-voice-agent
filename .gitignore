@@ -1,0 +1,25 @@
+# Python & Environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+.env
+
+# Database & runtime files
+*.db
+*.db-journal
+*.log
+tunnel.log
+
+# Binary executables
+cloudflared.exe
+cloudflared
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

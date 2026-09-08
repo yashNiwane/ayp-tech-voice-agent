@@ -1,0 +1,11 @@
+pipecat-ai[runner,webrtc]==1.8.1
+pipecat-ai-prebuilt==1.0.6
+google-genai==2.22.0
+python-dotenv==1.2.3
+loguru==0.7.3
+numpy>=1.26.0,<3.0.0
+av>=11.0.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
+aiortc>=1.9.0
+requests>=2.31.0

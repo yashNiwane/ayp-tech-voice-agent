@@ -579,6 +579,32 @@ if os.path.isdir(CUSTOM_UI_DIR):
     def _custom_setup_frontend_routes(app):
         app.mount("/client", StaticFiles(directory=CUSTOM_UI_DIR, html=True))
 
+        @app.get("/api/leads")
+        async def get_leads():
+            """Returns all collected loan applicant leads from SQLite."""
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM loan_leads ORDER BY created_at DESC")
+                    rows = cursor.fetchall()
+                    return {"status": "success", "count": len(rows), "leads": [dict(r) for r in rows]}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        @app.get("/api/call-logs")
+        async def get_call_logs():
+            """Returns all call termination logs."""
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM call_logs ORDER BY created_at DESC")
+                    rows = cursor.fetchall()
+                    return {"status": "success", "count": len(rows), "logs": [dict(r) for r in rows]}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
         @app.get("/", include_in_schema=False)
         async def root_redirect():
             return RedirectResponse(url="/client/")

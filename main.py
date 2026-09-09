@@ -789,7 +789,14 @@ def _start_cloudflare_tunnel():
         log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tunnel.log")
         with open(log_file, "w", encoding="utf-8") as f:
             proc = subprocess.Popen(
-                [cloudflared_bin, "tunnel", "--url", "http://localhost:7860"],
+                [
+                    cloudflared_bin,
+                    "tunnel",
+                    "--protocol",
+                    "http2",
+                    "--url",
+                    "http://localhost:7860",
+                ],
                 stdout=f,
                 stderr=subprocess.STDOUT,
                 text=True,

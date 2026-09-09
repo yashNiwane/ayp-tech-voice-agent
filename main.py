@@ -48,7 +48,7 @@ load_dotenv()
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loan_leads.db")
 
 # Protection thresholds
-MAX_CALL_DURATION_SECONDS = 120  # 2 minutes maximum
+MAX_CALL_DURATION_SECONDS = 180  # 3 minutes maximum (allows natural conversation, confirmation, and updates)
 INITIAL_SILENCE_TIMEOUT_SECONDS = 15  # 15 seconds if customer is silent after pickup
 INACTIVITY_TIMEOUT_SECONDS = 25  # 25 seconds of silence mid-call
 VOICE_ENERGY_THRESHOLD = 250.0  # RMS threshold for detecting actual user speech
@@ -101,10 +101,46 @@ def init_db():
     logger.info(f"SQLite database initialized at {DB_PATH}")
 
 
-def insert_loan_lead(data: Mapping[str, Any]) -> int:
-    """Inserts a lead in the SQLite database."""
+current_call_lead_id: int | None = None
+
+
+def insert_or_update_loan_lead(data: Mapping[str, Any]) -> int:
+    """Inserts or updates a lead in the SQLite database for the active call."""
+    global current_call_lead_id
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
+        if current_call_lead_id is not None:
+            # Update existing lead record for this call
+            fields_to_update = []
+            values = []
+            for field in [
+                "customer_name",
+                "phone_number",
+                "loan_purpose",
+                "loan_amount",
+                "employment_type",
+                "monthly_income",
+                "tenure_years",
+                "existing_emi",
+                "interest_level",
+            ]:
+                if field in data and data[field] is not None:
+                    fields_to_update.append(f"{field} = ?")
+                    values.append(data[field])
+
+            if "is_interested" in data and data["is_interested"] is not None:
+                fields_to_update.append("is_interested = ?")
+                values.append(1 if data["is_interested"] else 0)
+
+            if fields_to_update:
+                values.append(current_call_lead_id)
+                query = f"UPDATE loan_leads SET {', '.join(fields_to_update)}, status = 'DETAILS_UPDATED' WHERE id = ?"
+                cursor.execute(query, tuple(values))
+                conn.commit()
+                logger.info(f"Updated existing loan lead #{current_call_lead_id}: {data}")
+                return current_call_lead_id
+
+        # Otherwise insert a new record
         cursor.execute(
             """
             INSERT INTO loan_leads (
@@ -138,9 +174,9 @@ def insert_loan_lead(data: Mapping[str, Any]) -> int:
             ),
         )
         conn.commit()
-        lead_id = cursor.lastrowid
-        logger.info(f"Saved loan lead #{lead_id} to SQLite: {data}")
-        return lead_id
+        current_call_lead_id = cursor.lastrowid
+        logger.info(f"Saved new loan lead #{current_call_lead_id} to SQLite: {data}")
+        return current_call_lead_id
 
 
 def log_call_termination(duration: float, reason: str, notes: str = ""):
@@ -344,27 +380,37 @@ transport_params = {
 }
 
 HDFC_LOAN_HINDI_INSTRUCTION = """
-Aap Aarav (HDFC Bank) hain. Natural Hindi/Hinglish mein baat karein.
+Aap Aarav (HDFC Bank se) hain. Ek professional aur warm banking advisor ki tarah natural Hindi/Hinglish mein baat karein.
 
-Goal: Name, loan details aur interest level collect karke `save_customer_loan_details` mein save karna.
+Goal:
+1. Customer se friendly baat karke unka Naam, Loan requirement (Amount, Purpose, Employment, Monthly Income, Tenure) aur genuine Interest Level collect karein.
+2. Saari details milne ke baad turant `save_customer_loan_details` tool call karein.
+3. CRITICAL - FINAL CONFIRMATION & UPDATE:
+   Details save karne ke baad customer ko sari details politely repeat karke confirm karein:
+   "Dhanyawad [Name] ji! Main aapki details confirm kar deta hoon:
+    - Loan Amount: ₹[Amount] ([Purpose] ke liye)
+    - Employment: [Salaried/Business], Monthly Income: ₹[Income]
+    - Tenure: [Tenure] saal, Interest Rate: 10%
+    Kya yeh saari details bilkul sahi hain, ya aap isme kuch update ya change karna chahenge?"
+4. AGAR CUSTOMER KUCH UPDATE YA CHANGE KARNE KO KAHE (jaise amount badhana/kam karna, tenure badalna, ya income theek karna):
+   - Usko warmly accept karein: "Zaroor sir, main isko abhi update kar deta hoon."
+   - Turant `update_customer_loan_details` tool call karein naye data ke saath.
+   - Phir updated detail confirm karein.
+5. Jab customer bole "Haan sahi hai" ya final confirmation de de:
+   - Batayein ki HDFC branch verification team unse jald contact karegi.
+   - Polite alvida bolkar `end_call` tool call karein.
 
 Rules:
-- 2–3 short sentences per turn. Ek time par sirf ek question.
-- First message: Sirf greeting + name poochein. LOAN ka zikr bilkul na karein.
-- No fake promises, links, ya call transfer. Call 2 min se choti rakhein.
+- 1 se 2 short sentences per turn. Kabhi ek saath 2-3 sawaal mat daagein.
+- First message: Sirf polite greeting + shubh naam poochein ("Namaste, main HDFC Bank se Aarav baat kar raha hoon. Kya main aapka shubh naam jaan sakta hoon?"). LOAN ka zikr bilkul na karein pehle dialogue mein.
+- Natural, courteous tone: "Ji bilkul", "Sahi kaha aapne", "Shukriya [Name] ji".
+- No fake promises, SMS/WhatsApp links ya call transfer.
+- Call time around 2–2.5 minutes mein naturally conclude ho jana chahiye.
 
-Flow:
-1. Start: "Namaste, main HDFC Bank se Aarav baat kar raha hoon. Kya main aapka shubh naam jaan sakta hoon?"
-2. Naam milne par: 10% pre-approved personal loan offer batayein aur requirement poochein.
-3. Purpose → Amount → Salaried/Business → Monthly income → Tenure.
-4. Interest level evaluate karein: HIGH / MEDIUM / LOW / NOT_INTERESTED.
-5. Details milte hi `save_customer_loan_details` call karein aur thank you kahein.
-
-Tools & Objections:
-- `save_customer_loan_details`: Name, amount, employment, income, interest_level milte hi call karein.
-- `end_call`: Customer bole 'Call cut karo', loan reject kare, ya time waste kare toh polite alvida kehkar turant call karein.
-- Busy / No loan: "Koi baat nahi sir, thank you" bolkar `end_call` karein.
-- Rate high: "Sir 10% hamara lowest tier rate hai."
+Tools:
+- `save_customer_loan_details`: Jab pehli baar details collect ho jayein toh ise call karein.
+- `update_customer_loan_details`: Jab bhi customer confirmation ke waqt ya beech mein koi bhi detail (amount, income, tenure, purpose, employment) update/change karne ko bole, turant ise call karein.
+- `end_call`: Customer bole call cut karo, loan mana kare, ya confirmation ke baad bye bol de toh call karein.
 """
 
 # Global reference for active worker to trigger disconnects
@@ -374,16 +420,34 @@ current_active_worker: PipelineWorker | None = None
 async def save_customer_loan_details_handler(params: FunctionCallParams):
     """Tool handler that writes collected lead data into SQLite database."""
     args = params.arguments
-    logger.info(f"Executing save_customer_loan_details tool with arguments: {args}")
+    logger.info(f"Executing save_customer_loan_details tool: {args}")
     try:
-        lead_id = insert_loan_lead(args)
+        lead_id = insert_or_update_loan_lead(args)
         result = {
             "status": "success",
             "lead_id": lead_id,
-            "message": "Customer loan application details have been recorded successfully in SQLite database.",
+            "message": "Customer loan application details saved. Now please confirm these details with the customer.",
         }
     except Exception as e:
         logger.error(f"Error saving lead to SQLite: {e}")
+        result = {"status": "error", "error": str(e)}
+
+    await params.result_callback(result)
+
+
+async def update_customer_loan_details_handler(params: FunctionCallParams):
+    """Tool handler that updates specific fields when customer requests corrections or changes."""
+    args = params.arguments
+    logger.info(f"Executing update_customer_loan_details tool: {args}")
+    try:
+        lead_id = insert_or_update_loan_lead(args)
+        result = {
+            "status": "success",
+            "lead_id": lead_id,
+            "message": "Customer loan details updated successfully in database. Confirm the updated detail to customer.",
+        }
+    except Exception as e:
+        logger.error(f"Error updating lead in SQLite: {e}")
         result = {"status": "error", "error": str(e)}
 
     await params.result_callback(result)
@@ -402,7 +466,7 @@ async def end_call_handler(params: FunctionCallParams):
 
 save_loan_tool = FunctionSchema(
     name="save_customer_loan_details",
-    description="Saves customer's personal loan application details including their name and assessed interest level into HDFC database.",
+    description="Saves customer's personal loan application details into HDFC database when initially collected.",
     properties={
         "customer_name": {
             "type": "string",
@@ -445,13 +509,58 @@ save_loan_tool = FunctionSchema(
     handler=save_customer_loan_details_handler,
 )
 
+update_loan_tool = FunctionSchema(
+    name="update_customer_loan_details",
+    description="Updates previously recorded customer loan application details when the customer requests a change or correction.",
+    properties={
+        "customer_name": {
+            "type": "string",
+            "description": "Updated name of the customer if requested",
+        },
+        "loan_purpose": {
+            "type": "string",
+            "description": "Updated purpose of the loan",
+        },
+        "loan_amount": {
+            "type": "number",
+            "description": "Updated loan amount in INR (e.g. 500000)",
+        },
+        "employment_type": {
+            "type": "string",
+            "description": "Updated employment status, e.g. 'Salaried' or 'Self-Employed'",
+        },
+        "monthly_income": {
+            "type": "number",
+            "description": "Updated monthly in-hand income in INR",
+        },
+        "tenure_years": {
+            "type": "integer",
+            "description": "Updated repayment tenure in years (1 to 5)",
+        },
+        "existing_emi": {
+            "type": "number",
+            "description": "Updated ongoing monthly EMI amount in INR",
+        },
+        "interest_level": {
+            "type": "string",
+            "description": "Updated customer interest level: 'HIGH', 'MEDIUM', 'LOW', 'NOT_INTERESTED'",
+        },
+        "is_interested": {
+            "type": "boolean",
+            "description": "True if customer is interested, False if they want to cancel",
+        },
+    },
+    required=[],
+    handler=update_customer_loan_details_handler,
+)
+
 end_call_tool = FunctionSchema(
     name="end_call",
-    description="Terminates and hangs up the live phone call when conversation is finished, customer is not interested, or wasting time.",
+    description="Terminates and hangs up the live phone call when conversation is finished, customer is not interested, or confirmed and wrapped up.",
     properties={
         "reason": {
             "type": "string",
-            "description": "Reason for hanging up: 'DETAILS_COLLECTED', 'CUSTOMER_NOT_INTERESTED', 'CUSTOMER_BUSY', 'IRRELEVANT_CONVERSATION', 'CUSTOMER_PLAYING'",
+            "description": "Reason for hanging up: 'DETAILS_CONFIRMED', 'DETAILS_COLLECTED', 'CUSTOMER_NOT_INTERESTED', 'CUSTOMER_BUSY', 'IRRELEVANT_CONVERSATION'",
         }
     },
     required=["reason"],
@@ -475,7 +584,7 @@ async def run_bot(
     llm = GeminiLiveLLMService(
         name="AYP Voice Engine",
         api_key=api_key,
-        tools=[save_loan_tool, end_call_tool],
+        tools=[save_loan_tool, update_loan_tool, end_call_tool],
         settings=GeminiLiveLLMService.Settings(
             model="gemini-3.1-flash-live-preview",
             voice="Puck",
@@ -532,6 +641,8 @@ async def run_bot(
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
+        global current_call_lead_id
+        current_call_lead_id = None
         logger.info("Client connected to HDFC Hindi Loan session")
         protection_monitor.start_monitoring()
         context.add_message(

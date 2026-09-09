@@ -709,6 +709,55 @@ if os.path.isdir(CUSTOM_UI_DIR):
     from starlette.responses import RedirectResponse
 
     def _custom_setup_frontend_routes(app):
+        from fastapi.responses import StreamingResponse
+        import io
+        import csv
+
+        @app.get("/api/export-csv")
+        async def export_leads_csv():
+            """Exports all collected leads from SQLite database as a CSV file."""
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow([
+                "ID",
+                "Customer Name",
+                "Phone Number",
+                "Loan Purpose",
+                "Loan Amount (INR)",
+                "Employment Type",
+                "Monthly Income (INR)",
+                "Tenure (Years)",
+                "Existing EMI (INR)",
+                "Interest Rate (%)",
+                "Interest Level",
+                "Interested?",
+                "Status",
+                "Recorded Timestamp (UTC)",
+            ])
+            with sqlite3.connect(DB_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM loan_leads ORDER BY id DESC")
+                rows = cursor.fetchall()
+                for row in rows:
+                    writer.writerow(row)
+
+            output.seek(0)
+            return StreamingResponse(
+                io.BytesIO(output.getvalue().encode("utf-8-sig")),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=ayp_tech_collected_leads.csv"},
+            )
+
+        @app.get("/api/leads")
+        async def get_leads_json():
+            """Returns leads as JSON for the web UI."""
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM loan_leads ORDER BY id DESC")
+                rows = [dict(r) for r in cursor.fetchall()]
+                return {"count": len(rows), "leads": rows}
+
         app.mount("/client", StaticFiles(directory=CUSTOM_UI_DIR, html=True))
 
         @app.get("/", include_in_schema=False)

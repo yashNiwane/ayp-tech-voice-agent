@@ -57,10 +57,54 @@
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     });
   </script>
+  <style>
+    /* Floating CSV Download Button */
+    .csv-download-btn {
+      position: fixed;
+      top: 18px;
+      right: 20px;
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: #ffffff;
+      background: linear-gradient(135deg, #1e40af, #2563eb);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+      transition: all 0.2s ease;
+    }
+    .csv-download-btn:hover {
+      background: linear-gradient(135deg, #1d4ed8, #1d4ed8);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.45);
+    }
+    .csv-download-btn:active {
+      transform: translateY(0);
+    }
+    .csv-download-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+  </style>
 </head>
 
 <body>
   <div id="root"></div>
+
+  <!-- AYP Tech Leads CSV Download Action -->
+  <a href="/api/export-csv" class="csv-download-btn" title="Download all collected customer leads in CSV format" download>
+    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+    </svg>
+    Download Leads CSV
+  </a>
 </body>
 
 </html>

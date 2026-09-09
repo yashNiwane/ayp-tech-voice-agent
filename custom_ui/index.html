@@ -21,6 +21,23 @@
     }
   </style>
   <script>
+    // Ensure WebRTC peer connection always has STUN servers for NAT traversal across Cloudflare tunnels
+    const OrigRTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    if (OrigRTCPeerConnection) {
+      window.RTCPeerConnection = function (config) {
+        config = config || {};
+        if (!config.iceServers || config.iceServers.length === 0) {
+          config.iceServers = [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" }
+          ];
+        }
+        return new OrigRTCPeerConnection(config);
+      };
+      window.RTCPeerConnection.prototype = OrigRTCPeerConnection.prototype;
+    }
+
     // Runtime cleaner that sanitizes any dynamic mentions of Gemini or tech stack
     const sanitizeDOM = () => {
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);

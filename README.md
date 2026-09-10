@@ -6,38 +6,37 @@ AI-powered voice agent for automated customer engagement and data collection wit
 
 ## ⚡ Quick Start on Kaggle
 
-You can easily run this voice agent inside a **Kaggle Notebook** with public Cloudflare access:
+You can easily run this voice agent inside a **Kaggle Notebook** with public access via ngrok:
 
-### Step 1: Clone Repository in Kaggle
-In your Kaggle notebook cell:
+### Step 1: Add Credentials to Kaggle Secrets
+In your Kaggle Notebook:
+1. Click **Add-ons** > **Secrets** in the top menu bar.
+2. Add the following secrets:
+   - `GOOGLE_API_KEY`: Your Gemini API key.
+   - `NGROK_AUTHTOKEN`: Your free authtoken from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken).
+
+### Step 2: Clone & Install Dependencies
+In a Kaggle notebook code cell:
 ```bash
 !git clone https://github.com/yashNiwane/ayp-tech-voice-agent.git
 %cd ayp-tech-voice-agent
-```
-
-### Step 2: Install Dependencies & Cloudflare Tunnel
-```bash
 !pip install -r requirements.txt
-!wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
-!chmod +x cloudflared
 ```
 
-### Step 3: Set Gemini API Key & Run
+### Step 3: Run
 ```bash
-import os
-os.environ["GOOGLE_API_KEY"] = "YOUR_GOOGLE_API_KEY_HERE"  # Or use Kaggle Secrets
-
 !python main.py
 ```
+*(The script automatically retrieves your `GOOGLE_API_KEY` and `NGROK_AUTHTOKEN` directly from Kaggle Secrets!)*
 
-The notebook output will print your public demo link:
+The notebook output will print your live public demo link:
 ```text
 ======================================================================
-🚀 AYP Tech Public Cloudflare Demo URL:
-   https://xxxx-xxxx-xxxx.trycloudflare.com
+🚀 AYP Tech Public Demo URL (ngrok):
+   https://xxxx-xxxx.ngrok-free.app
 ======================================================================
 ```
-Share this URL with your client to test the live voice portal directly from any web browser!
+Share this URL to access and test the live voice portal directly from any web browser!
 
 ---
 

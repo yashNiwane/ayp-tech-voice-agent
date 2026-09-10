@@ -45,6 +45,50 @@ if sys.platform == "win32":
 
 load_dotenv()
 
+
+def _load_kaggle_secrets():
+    """Loads secrets automatically from Kaggle Secrets if running in a Kaggle Notebook."""
+    try:
+        from kaggle_secrets import UserSecretsClient
+        user_secrets = UserSecretsClient()
+        logger.info("Kaggle environment detected. Loading credentials from Kaggle Secrets...")
+
+        # 1. Google / Gemini API Key
+        for key in ["GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key", "gemini_api_key"]:
+            if not os.environ.get("GOOGLE_API_KEY"):
+                try:
+                    val = user_secrets.get_secret(key)
+                    if val:
+                        os.environ["GOOGLE_API_KEY"] = val
+                        os.environ["GEMINI_API_KEY"] = val
+                        logger.info(f"Loaded '{key}' from Kaggle Secrets.")
+                        break
+                except Exception:
+                    pass
+
+        # 2. Ngrok Authtoken
+        for token_key in ["NGROK_AUTHTOKEN", "NGROK_AUTH_TOKEN", "NGROK_API_TOKEN", "ngrok_authtoken", "ngrok_token", "NGROK_TOKEN", "ngrok"]:
+            if not os.environ.get("NGROK_AUTHTOKEN"):
+                try:
+                    val = user_secrets.get_secret(token_key)
+                    if val:
+                        os.environ["NGROK_AUTHTOKEN"] = val
+                        logger.info(f"Loaded '{token_key}' from Kaggle Secrets.")
+                        break
+                except Exception:
+                    pass
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug(f"Kaggle secrets check bypassed: {e}")
+
+    # Fallback sync between GOOGLE_API_KEY and GEMINI_API_KEY if one is set
+    if not os.environ.get("GOOGLE_API_KEY") and os.environ.get("GEMINI_API_KEY"):
+        os.environ["GOOGLE_API_KEY"] = os.environ.get("GEMINI_API_KEY")
+
+
+_load_kaggle_secrets()
+
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loan_leads.db")
 
 # Protection thresholds
@@ -598,9 +642,15 @@ async def run_bot(
 
     init_db()
 
+    if not os.environ.get("GOOGLE_API_KEY"):
+        _load_kaggle_secrets()
+
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise ValueError("GOOGLE_API_KEY environment variable is not set")
+        raise ValueError(
+            "GOOGLE_API_KEY (or GEMINI_API_KEY) is not set. "
+            "Please add it to Kaggle Secrets (Add-ons -> Secrets) or set it in your .env file."
+        )
 
     llm = GeminiLiveLLMService(
         name="AYP Voice Engine",
@@ -765,8 +815,48 @@ if os.path.isdir(CUSTOM_UI_DIR):
             return RedirectResponse(url="/client/")
 
     runner_module._setup_frontend_routes = _custom_setup_frontend_routes
-def _start_cloudflare_tunnel():
-    """Starts a Cloudflare quick tunnel to expose the AYP Tech UI publicly (works on Windows & Linux/Kaggle)."""
+def _start_ngrok_tunnel(port: int = 7860):
+    """Starts an ngrok tunnel using the authtoken from Kaggle Secrets or environment variables."""
+    token = os.environ.get("NGROK_AUTHTOKEN") or os.environ.get("NGROK_AUTH_TOKEN")
+    if not token:
+        return False
+
+    try:
+        try:
+            from pyngrok import ngrok
+        except ImportError:
+            import subprocess
+            logger.info("pyngrok not found. Automatically installing pyngrok...")
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pyngrok>=7.1.0"], check=True)
+            from pyngrok import ngrok
+
+        logger.info("Authenticating ngrok with credentials from Kaggle Secrets...")
+        ngrok.set_auth_token(token)
+
+        # Kill any stale ngrok tunnels if restarting in notebook
+        try:
+            ngrok.kill()
+        except Exception:
+            pass
+
+        tunnel = ngrok.connect(port, "http")
+        url = tunnel.public_url
+        if url.startswith("http://"):
+            url = url.replace("http://", "https://", 1)
+
+        print("\n" + "=" * 70)
+        print(f"🚀 AYP Tech Public Demo URL (ngrok):")
+        print(f"   {url}")
+        print("=" * 70 + "\n")
+        logger.info(f"Public demo live at: {url}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to start ngrok tunnel: {e}")
+        return False
+
+
+def _start_cloudflare_tunnel(port: int = 7860):
+    """Starts a Cloudflare quick tunnel to expose the AYP Tech UI publicly as fallback."""
     import shutil
     import subprocess
     import threading
@@ -787,28 +877,28 @@ def _start_cloudflare_tunnel():
 
     def run_tunnel():
         log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tunnel.log")
-        with open(log_file, "w", encoding="utf-8") as f:
-            proc = subprocess.Popen(
-                [
-                    cloudflared_bin,
-                    "tunnel",
-                    "--protocol",
-                    "http2",
-                    "--url",
-                    "http://localhost:7860",
-                ],
-                stdout=f,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
+        f = open(log_file, "a", encoding="utf-8")
+        proc = subprocess.Popen(
+            [
+                cloudflared_bin,
+                "tunnel",
+                "--protocol",
+                "http2",
+                "--url",
+                f"http://localhost:{port}",
+            ],
+            stdout=f,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
 
         # Poll log file for public tunnel URL and print it prominently
         for _ in range(40):
             time.sleep(1.0)
             if os.path.exists(log_file):
                 try:
-                    with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
+                    with open(log_file, "r", encoding="utf-8", errors="ignore") as rf:
+                        content = rf.read()
                         match = re.search(r"https://[-a-zA-Z0-9]+\.trycloudflare\.com", content)
                         if match:
                             url = match.group(0)
@@ -826,12 +916,22 @@ def _start_cloudflare_tunnel():
     logger.info(f"Cloudflare tunnel started using {cloudflared_bin}")
 
 
+def _start_tunnel():
+    """Attempts to start an ngrok tunnel first (using Kaggle Secrets).
+    If no ngrok token is provided or it fails, falls back to Cloudflare.
+    """
+    if _start_ngrok_tunnel():
+        return
+    logger.info("No ngrok token provided or ngrok failed, falling back to Cloudflare tunnel...")
+    _start_cloudflare_tunnel()
+
+
 if __name__ == "__main__":
-    # Ensure public STUN servers are configured so WebRTC connections work over Cloudflare tunnels / Kaggle NAT
+    # Ensure public STUN servers are configured so WebRTC connections work over tunnels / Kaggle NAT
     if not os.getenv("PIPECAT_ICE_SERVERS"):
         os.environ["PIPECAT_ICE_SERVERS"] = "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun2.l.google.com:19302"
 
-    _start_cloudflare_tunnel()
+    _start_tunnel()
     from pipecat.runner.run import main
 
     main()

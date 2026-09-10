@@ -9,3 +9,4 @@ fastapi>=0.115.0
 uvicorn>=0.30.0
 aiortc>=1.9.0
 requests>=2.31.0
+pyngrok>=7.1.0
